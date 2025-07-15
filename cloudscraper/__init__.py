@@ -175,8 +175,6 @@ class CloudScraper(Session):
         self.min_request_interval = kwargs.pop('min_request_interval', 1.0)  # Minimum 1 second between requests
         self.max_concurrent_requests = kwargs.pop('max_concurrent_requests', 1)  # Limit concurrent requests
         self.current_concurrent_requests = 0
-        self.rotate_tls_ciphers = kwargs.pop('rotate_tls_ciphers', True)  # Enable TLS cipher rotation
-        self._cipher_rotation_count = 0
 
         # Proxy management
         proxy_options = kwargs.pop('proxy_options', {})
@@ -307,10 +305,6 @@ class CloudScraper(Session):
         # Throttle only for top-level calls unless explicitly skipped
         if not skip_throttle and not is_nested:
             self._apply_request_throttling()
-
-        # Rotate TLS cipher suites to avoid detection
-        if self.rotate_tls_ciphers:
-            self._rotate_tls_cipher_suite()
 
         # Refresh session if stale or after recent 403
         if self._should_refresh_session():
@@ -517,62 +511,6 @@ class CloudScraper(Session):
 
         self.last_request_time = time.time()
 
-    def _rotate_tls_cipher_suite(self):
-        """
-        Rotate TLS cipher suites to avoid detection patterns
-        """
-        if not hasattr(self, 'user_agent') or not hasattr(self.user_agent, 'cipherSuite'):
-            return
-
-        # Get available cipher suites for current browser
-        browser_name = getattr(self.user_agent, 'browser', 'chrome')
-
-        try:
-            # Get cipher suites from browsers.json
-            import json
-            import os
-            browsers_file = os.path.join(os.path.dirname(__file__), 'user_agent', 'browsers.json')
-
-            with open(browsers_file, 'r') as f:
-                browsers_data = json.load(f)
-
-            available_ciphers = browsers_data.get('cipherSuite', {}).get(browser_name, [])
-
-            if available_ciphers and len(available_ciphers) > 1:
-                # Rotate through cipher suites
-                self._cipher_rotation_count += 1
-                cipher_index = self._cipher_rotation_count % len(available_ciphers)
-
-                # Use a subset of ciphers to create variation
-                num_ciphers = min(8, len(available_ciphers))  # Use up to 8 ciphers
-                start_index = cipher_index % (len(available_ciphers) - num_ciphers + 1)
-                selected_ciphers = available_ciphers[start_index:start_index + num_ciphers]
-
-                new_cipher_suite = ':'.join(selected_ciphers)
-
-                if new_cipher_suite != self.cipherSuite:
-                    self.cipherSuite = new_cipher_suite
-
-                    # Update the HTTPS adapter with new cipher suite
-                    self.mount(
-                        'https://',
-                        CipherSuiteAdapter(
-                            cipherSuite=self.cipherSuite,
-                            ecdhCurve=self.ecdhCurve,
-                            server_hostname=self.server_hostname,
-                            source_address=self.source_address,
-                            ssl_context=self.ssl_context
-                        )
-                    )
-
-                    if self.debug:
-                        print(f'🔐 Rotated TLS cipher suite (rotation #{self._cipher_rotation_count})')
-                        print(f'    Using {len(selected_ciphers)} ciphers starting from index {start_index}')
-
-        except Exception as e:
-            if self.debug:
-                print(f'⚠️ TLS cipher rotation failed: {e}')
-
     # ------------------------------------------------------------------------------- #
 
     @classmethod
@@ -597,7 +535,6 @@ class CloudScraper(Session):
         - max_403_retries: Maximum number of 403 retry attempts (default: 3)
         - min_request_interval: Minimum time in seconds between requests (default: 1.0)
         - max_concurrent_requests: Maximum number of concurrent requests (default: 1)
-        - rotate_tls_ciphers: Whether to rotate TLS cipher suites to avoid detection (default: True)
         - disableCloudflareV3: Whether to disable Cloudflare v3 JavaScript VM challenge handling (default: False)
         - disableTurnstile: Whether to disable Cloudflare Turnstile challenge handling (default: False)
         """
