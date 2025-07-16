@@ -306,10 +306,6 @@ class CloudScraper(Session):
         if not skip_throttle and not is_nested:
             self._apply_request_throttling()
 
-        # Refresh session if stale or after recent 403
-        if self._should_refresh_session():
-            self._refresh_session(url)
-
         # Handle proxies
         if not kwargs.get('proxies') and hasattr(self, 'proxy_manager') and self.proxy_manager.proxies:
             kwargs['proxies'] = self.proxy_manager.get_proxy()
@@ -382,23 +378,6 @@ class CloudScraper(Session):
                 self._solveDepthCnt = 0
                 if response.status_code == 200 and not hasattr(self, '_in_403_retry'):
                     self._403_retry_count = 0
-
-            # Auto-refresh on 403
-            if response.status_code == 403 and self.auto_refresh_on_403:
-                if self._403_retry_count < self.max_403_retries:
-                    self._403_retry_count += 1
-                    self.last_403_time = time.time()
-                    if self._refresh_session(url):
-                        self._in_403_retry = True
-                        try:
-                            return self.request(
-                                method,
-                                url,
-                                *args,
-                                **{**kwargs, '_skip_throttle': True}
-                            )
-                        finally:
-                            del self._in_403_retry
 
             return response
 
